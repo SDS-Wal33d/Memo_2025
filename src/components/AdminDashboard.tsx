@@ -8,6 +8,8 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const [students, setStudents] = useState<any[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!user) {
@@ -16,43 +18,76 @@ const AdminDashboard = () => {
     }
 
     const checkAdminStatus = async () => {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
 
-      if (profile?.role !== 'admin') {
-        navigate('/dashboard');
-        return;
+        if (profile?.role !== 'admin') {
+          navigate('/dashboard');
+          return;
+        }
+
+        setIsAdmin(true);
+        await fetchStudents();
+      } catch (error: any) {
+        console.error('Error checking admin status:', error.message);
+        setError('Failed to verify admin privileges');
+      } finally {
+        setLoading(false);
       }
-
-      setIsAdmin(true);
-      fetchStudents();
-    };
-
-    const fetchStudents = async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('role', 'student');
-
-      if (error) {
-        console.error('Error fetching students:', error);
-        return;
-      }
-
-      setStudents(data || []);
     };
 
     checkAdminStatus();
   }, [user, navigate]);
+
+  const fetchStudents = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'student')
+        .order('student_id', { ascending: true });
+
+      if (error) throw error;
+
+      setStudents(data || []);
+    } catch (error: any) {
+      console.error('Error fetching students:', error.message);
+      setError('Failed to load student data');
+    }
+  };
+
+  const handleStatusToggle = async (studentId: string, currentStatus: string) => {
+    try {
+      const newStatus = currentStatus === 'confirmed' ? 'pending' : 'confirmed';
+      
+      const { error } = await supabase
+        .from('profiles')
+        .update({ graduation_status: newStatus })
+        .eq('id', studentId);
+
+      if (error) throw error;
+
+      setStudents(students.map(student => 
+        student.id === studentId 
+          ? { ...student, graduation_status: newStatus }
+          : student
+      ));
+    } catch (error: any) {
+      console.error('Error updating status:', error.message);
+      setError('Failed to update student status');
+    }
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate('/');
   };
 
+  if (loading) return null;
   if (!isAdmin) return null;
 
   return (
@@ -63,6 +98,12 @@ const AdminDashboard = () => {
             <h2 className="text-2xl font-bold leading-6 text-gray-900">Admin Dashboard</h2>
             <p className="mt-2 text-sm text-gray-500">Manage graduation attendees and their status</p>
           </div>
+
+          {error && (
+            <div className="mt-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
 
           <div className="mt-8">
             <div className="flex flex-col">
@@ -83,6 +124,9 @@ const AdminDashboard = () => {
                           </th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Status
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Actions
                           </th>
                         </tr>
                       </thead>
@@ -107,6 +151,18 @@ const AdminDashboard = () => {
                                 {student.graduation_status || 'pending'}
                               </span>
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                              <button
+                                onClick={() => handleStatusToggle(student.id, student.graduation_status)}
+                                className={`px-3 py-1 rounded ${
+                                  student.graduation_status === 'confirmed'
+                                    ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
+                                    : 'bg-green-100 text-green-800 hover:bg-green-200'
+                                }`}
+                              >
+                                {student.graduation_status === 'confirmed' ? 'Set Pending' : 'Confirm'}
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -120,7 +176,7 @@ const AdminDashboard = () => {
           <div className="mt-6">
             <button
               onClick={handleSignOut}
-              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+              className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition duration-150 ease-in-out"
             >
               Sign Out
             </button>
